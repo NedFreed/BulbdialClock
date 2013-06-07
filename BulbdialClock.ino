@@ -10,9 +10,10 @@ Updates 2013 William B Phelps:
  - logarithmic fade option
  - stop time update for negative second adjustment
  - interrupt driven display
+ - GPS support
 Todo:
+ - if GPS, set but ignore Chronodot?
  - auto dim/bright
- - GPS instead of Chronodot
  - time setting button repeat
  
  Software for the Bulbdial Clock kit designed by
@@ -45,6 +46,7 @@ Todo:
 #include <EEPROM.h>            // For saving settings
 #include <Wire.h>              // For optional RTC module
 #include <Time.h>              // For optional Serial Sync
+#include "gps.h"
 
 /*
  EEPROM variables that are saved:  7
@@ -224,37 +226,6 @@ void TakeLow(byte LEDline)
 }
 
 
-void delayTime(byte time)  // delay (time * 0.045) ms
-{
-  unsigned int delayvar;
-  delayvar = 0;
-  while (delayvar <=  time)
-  {
-    asm("nop");
-    delayvar++;
-  }
-}
-
-
-boolean getPCtime() {
-  // if time sync available from serial port, update time and return true
-  while(Serial.available() >=  TIME_MSG_LEN ){  // time message consists of a header and ten ascii digits
-    if( Serial.read() == TIME_HEADER ) {
-      time_t pctime = 0;
-      for(int i=0; i < TIME_MSG_LEN -1; i++){
-        char c= Serial.read();
-        if( c >= '0' && c <= '9'){
-          pctime = (10 * pctime) + (c - '0') ;  // convert digits to a number
-        }
-      }
-      setTime(pctime);  // Sync Arduino clock to the time received on the serial port
-      return true;  // return true if time message received on the serial port
-    }
-  }
-  return false;  // if no message return false
-}
-
-
 void printDigits(byte digits){
   // utility function for digital clock display: prints preceding colon and leading 0
   Serial.print(":");
@@ -371,6 +342,70 @@ void ApplyDefaults (void) {
 }
 
 
+void delayTime(byte time)  // delay (time * 0.045) ms
+{
+  unsigned int delayvar;
+  delayvar = 0;
+  while (delayvar <=  time)
+  {
+    asm("nop");
+    delayvar++;
+  }
+}
+
+
+void adjustTime()
+{
+          Serial.print("adjustTime ");
+          Serial.print(hour());
+          Serial.print(":");
+          Serial.print(minute());
+          Serial.print(":");
+          Serial.print(second());
+          Serial.println("");
+  // Set time to that given from PC or GPS
+  timeNow = 3600L*hour() + 60*minute() + second();
+  if (timeNow > 43200)
+    timeNow -= 43200;  // 12 hour time in seconds
+
+  // Print confirmation
+  Serial.print("Clock synced at: ");
+  Serial.println(timeNow,DEC);
+
+  if(timeStatus() == timeSet) {  // update clocks if time has been synced
+
+    if ( prevtime != now() )
+    {
+      if (ExtRTC)
+        RTCsetTime(timeNow);
+
+      timeStatus();  // refresh the Date and time properties
+      digitalClockDisplay( );  // update digital clock
+      prevtime = now();
+    }
+  }
+}
+
+
+boolean getPCtime() {
+  // if time sync available from serial port, update time and return true
+  while(Serial.available() >=  TIME_MSG_LEN ){  // time message consists of a header and ten ascii digits
+    if( Serial.read() == TIME_HEADER ) {
+      time_t pctime = 0;
+      for(int i=0; i < TIME_MSG_LEN -1; i++){
+        char c= Serial.read();
+        if( c >= '0' && c <= '9'){
+          pctime = (10 * pctime) + (c - '0') ;  // convert digits to a number
+        }
+      }
+      setTime(pctime);  // Sync Arduino clock to the time received on the serial port
+      return true;  // return true if time message received on the serial port
+    }
+  }
+  return false;  // if no message return false
+}
+
+
 void EEReadSettings (void) {  // TODO: Detect ANY bad values, not just 255.
 
   byte detectBad = 0;
@@ -458,9 +493,9 @@ unsigned int t;
 
   t = timeNow;
   HrNow = t/3600;
-  t = t - HrNow*3600;  // seconds in this hour
+  t = t - 3600*HrNow;  // seconds in this hour
   MinNow = t/60;
-  SecNow = t - MinNow*60;
+  SecNow = t - 60*MinNow;
 
   SecDisp = (SecNow/2 + 15);  // Offset by 30 s to project *shadow* in the right place.
   if ( SecDisp > 29)
@@ -506,9 +541,9 @@ unsigned int t;
 
   t = timeNow;
   HrNow = t/3600;
-  t = t - HrNow*3600;  // seconds in this hour
+  t = t - 3600*HrNow;  // seconds in this hour
   MinNow = t/60;
-  SecNow = t - MinNow*60;
+  SecNow = t - 60*MinNow;
   msNow = millisNow - millisThen;  // how far into this second are we, in ms?
 
   switch (FadeMode)
@@ -738,7 +773,7 @@ byte RTCgetTime()
     seconds = (((seconds & 0b11110000)>>4)*10 + (seconds & 0b00001111));  // convert BCD to decimal
     minutes = (((minutes & 0b11110000)>>4)*10 + (minutes & 0b00001111));  // convert BCD to decimal
     hours = (((hours & 0b00110000)>>4)*10 + (hours & 0b00001111));  // convert BCD to decimal (assume 24 hour mode)
-    timeRTC = 3600*hours + 60*minutes + seconds;  // Values read from RTC
+    timeRTC = 3600L*hours + 60*minutes + seconds;  // Values read from RTC
     if (timeRTC > 43200)
       timeRTC -= 43200;  // 12 hour time in seconds
 
@@ -865,20 +900,24 @@ void setup()  // run once, when the sketch starts
 //  TCCR0A &= ~(_BV(WGM01) | _BV(WGM00));  // disable Timer0 PWM interrupts
   sei();
 
+//  GPSinit(96);
+//  gpsEnabled = true;
+  
 }  // End Setup
 
 // Arduino Timer0 prescaler = 64; 16000000/64 = 250,000 hz
-//volatile uint8_t mpx_counter = 0;
-//volatile uint8_t mpx_limit = 10;  // call Display at 50,000 hz
+volatile uint8_t mpx_counter = 0;
+volatile uint8_t mpx_limit = 100;  // call GPS Read at 1,000 hz
 // Timer1 interrupt runs once every 0.025 ms  (40,000 hz)
 SIGNAL(TIMER1_COMPA_vect) 
 {
 //  TCNT1 = 0;
+  if (DisplayOn)
+    DisplayMPX();
 //  mpx_counter ++;
 //  if (mpx_counter > mpx_limit) {
 //    mpx_counter = 0;
-      if (DisplayOn)
-        DisplayMPX();
+//    if (gpsEnabled) GPSread();
 //  }
 }
 
@@ -1376,8 +1415,8 @@ void loop()
       RefreshTime = 1;
     }
     
-//    if (((timeNow%60) == 0) && (SettingTime == 0) && ExtRTC)  // Check RTC once per minute, if not setting time & RTC enabled
-//      RTCgetTime();
+    if (((timeNow%60) == 0) && (SettingTime == 0) && ExtRTC)  // Check RTC once per minute, if not setting time & RTC enabled
+      RTCgetTime();
 
   }
   
@@ -1559,33 +1598,22 @@ void loop()
 
   // Can this sync be tried only once per second?
   if( getPCtime()) {  // try to get time sync from pc
-
-    // Set time to that given from PC.
-    timeNow = hour()*3600 + minute()*60 + second();
-
-    if (timeNow > 43200)
-      timeNow -= 43200;  // 12 hour time in seconds
-
-    // Print confirmation
-    Serial.println("Clock synced at: ");
-    Serial.println(now(),DEC);
-
-    if(timeStatus() == timeSet) {  // update clocks if time has been synced
-
-      if ( prevtime != now() )
-      {
-        if (ExtRTC)
-          RTCsetTime(timeNow);
-
-        timeStatus();  // refresh the Date and time properties
-        digitalClockDisplay( );  // update digital clock
-        prevtime = now();
-      }
-    }
+    adjustTime();
   }
 
-  while ((millis() - millisNow) < 10)  // run the main loop at 100 hz 
-    asm("nop");
+//  if (gpsEnabled) {
+//    if (gpsDataReady()) {
+//      parseGPSdata(gpsNMEA());  // get the GPS serial stream and possibly update the clock 
+//    }
+//  }
+
+  while ((millis() - millisNow) < 10) {  // run the main loop at 100 hz 
+//    asm("nop");
+    if (Serial.available())  // data on the serial port?
+      if (getGPSdata()) { // collect GPS data and parse it, maybe set the time
+        adjustTime();
+      }
+  }
 
 }  // END Loop
 
