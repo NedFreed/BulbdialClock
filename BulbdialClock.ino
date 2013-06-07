@@ -1552,8 +1552,8 @@ void loop()
   }
 
   if (SleepMode || (VCRmode && (timeNow & 1))) {
-    AllLEDsOff();
     DisplayOn = false;
+    AllLEDsOff();
   }
   else
     DisplayOn = true;
