@@ -516,9 +516,9 @@ unsigned int t;
     MinNext = 0;
 
   HrDisp = (HrNow + 6);  // Offset by 6 h to project *shadow* in the right place.
-  
-  if ( (FadeMode == 2) || (FadeMode == 4)) {
-    if ( (SettingTime == 0) && (MinNow > 30) )  // If half the hour has gone by, (wbp)
+
+  if ( (FadeMode == 2) || (FadeMode == 4) ) {
+    if ( (SettingTime == 0) && (MinNow > 39) )  // If two thirds the hour has gone by, (wbp)
       HrDisp += 1;  // advance the hour hand (wbp)
     if ( (OptionMode == 5) && (SecNow & 1) )  // If setting Fade modes, show hour hand "wiggle"
       HrDisp += 1;
@@ -553,18 +553,22 @@ unsigned int t;
   case 1:  // straddle 2 LEDs for odd seconds
     if (SecNow & 1)  // ODD second
       SecFade2 = 32;
+    if (MinNow & 1)  // Odd minute
+      MinFade2 = 32;
     break;
-  case 2:  // straddle 2 LEDs, move hour hand at 31 minutes
+  case 2:  // straddle 2 LEDs, move hour hand at 40 minutes
     if (SecNow & 1)  // ODD second
       SecFade2 = 32;
-    if (MinNow == 30)  // second half of the hour (wbp)
+    if (MinNow & 1)  // Odd minute
+      MinFade2 = 32;
+    if (MinNow == 39)  // last third of the hour (wbp)
     {
       if (SecNow == 59)
         HrFade2 = (msNow*63/1000);  // fade hour hand to new position
     }
     break;
   case 3:  // original fading
-  case 4:  // move hour hand at 31 minutes
+  case 4:  // move hour hand at 40 minutes
     // Normal time display
     if (SecNow & 1)  // ODD second
       SecFade2 = (msNow*63/1000);
@@ -574,8 +578,8 @@ unsigned int t;
         MinFade2 = SecFade2;
       }
     }
-    // fade the hour hand to it's next position, starting either at Minute 59 or Minute 30
-    if ( ((MinNow == 59) && (FadeMode == 3)) || ((MinNow == 30) && (FadeMode == 4)) )  // end of the hour or second half of the hour (wbp)
+    // fade the hour hand to it's next position, starting either at Minute 59 or Minute 39
+    if ( ((MinNow == 59) && (FadeMode == 3)) || ((MinNow == 39) && (FadeMode == 4)) )  // end of the hour or second half of the hour (wbp)
     {
       if (SecNow == 59){
         HrFade2 = SecFade2;
