@@ -373,6 +373,7 @@ void adjustTime()
   Serial.println(timeNow,DEC);
 
   if(timeStatus() == timeSet) {  // update clocks if time has been synced
+    VCRmode = false;
 
     if ( prevtime != now() )
     {
@@ -1605,12 +1606,6 @@ void loop()
   if( getPCtime()) {  // try to get time sync from pc
     adjustTime();
   }
-
-//  if (gpsEnabled) {
-//    if (gpsDataReady()) {
-//      parseGPSdata(gpsNMEA());  // get the GPS serial stream and possibly update the clock 
-//    }
-//  }
 
   while ((millis() - millisNow) < 10) {  // run the main loop at 100 hz 
 //    asm("nop");
