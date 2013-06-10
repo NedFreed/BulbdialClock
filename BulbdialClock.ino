@@ -289,7 +289,8 @@ byte PINDLast;
 
 // Modes:
 byte CCW;
-byte ExtRTC;
+byte ExtRTC;  // is there an RTC?
+byte ExtGPS = 0;  // is there a GPS attached?
 byte UpdateRTC;  // set to force RTC update
 byte SleepMode;
 byte FadeMode;
@@ -807,7 +808,7 @@ byte RTCgetTime()
 
 void setup()  // run once, when the sketch starts
 {
-  Serial.begin(9600);
+  Serial.begin(9600);  //  assume GPS (if any) is working at 9600 bps
   setTime(0);
 
   PORTB = 0;
@@ -868,7 +869,7 @@ void setup()  // run once, when the sketch starts
   Wire.begin();
 
   /*
-   // HIGHLY OPTIONAL: Set jardcoded RTC Time from within the program.
+   // HIGHLY OPTIONAL: Set hardcoded RTC Time from within the program.
    // Example: Set time to 2:52:45.
    
    RTCsetTime(2,52,45);
@@ -905,9 +906,6 @@ void setup()  // run once, when the sketch starts
 //  TCCR0A &= ~(_BV(WGM01) | _BV(WGM00));  // disable Timer0 PWM interrupts
   sei();
 
-//  GPSinit(96);
-//  gpsEnabled = true;
-  
 }  // End Setup
 
 // Arduino Timer0 prescaler = 64; 16000000/64 = 250,000 hz
@@ -1610,8 +1608,9 @@ void loop()
   while ((millis() - millisNow) < 10) {  // run the main loop at 100 hz 
 //    asm("nop");
     if (Serial.available())  // data on the serial port?
-      if (getGPSdata()) { // collect GPS data and parse it, maybe set the time
-        adjustTime();
+      ExtGPS = getGPSdata();  // collect GPS data and parse it, maybe set the time
+      if (ExtGPS) {   // If GPS is working and RMC message was used to set system time
+        adjustTime();  // adjust clock time
       }
   }
 

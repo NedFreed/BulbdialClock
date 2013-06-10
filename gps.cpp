@@ -6,10 +6,6 @@
 
 #include "gps.h"
 
-#ifndef DST_offset
-uint8_t DST_offset = 1;
-#endif
-
 uint8_t GPS_mode = 0;  // 0, 48, 96
 #define gpsTimeoutLimit 5  // 5 seconds until we display the "no gps" message
 
@@ -17,9 +13,9 @@ unsigned long tGPSupdateUT = 0;  // time since last GPS update in UT
 unsigned long tGPSupdate = 0;  // time since last GPS update in local time
 byte GPSupdating = false;
 
-int8_t TZ_hour = -8;
-int8_t TZ_minutes = 0;
-//uint8_t DST_offset = 0;
+int8_t TZ_hour = 0;  // Time zone hour
+int8_t TZ_minutes = 0;  // Time zone minute (multiples of 15 minutes)
+uint8_t DST_offset = 1;  // temp
 
 // GPS parser for 406a
 #define GPSBUFFERSIZE 128 // plenty big
