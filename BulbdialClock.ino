@@ -12,8 +12,9 @@ Updates 2013 William B Phelps:
  - interrupt driven display
  - GPS support
 Todo:
+ - auto dim/bright (needs 24 hour time - how to display/set?)
+ - how do you show am or pm on a 12 hour clock that only has hands?
  - if GPS, set but ignore Chronodot?
- - auto dim/bright
  - time setting button repeat
  
  Software for the Bulbdial Clock kit designed by
@@ -43,6 +44,8 @@ Todo:
  
  */
 
+#define Debug
+
 #include <EEPROM.h>            // For saving settings
 #include <Wire.h>              // For optional RTC module
 #include <Time.h>              // For optional Serial Sync
@@ -66,6 +69,7 @@ Todo:
 
 // "Factory" default configuration can be configured here:
 #define MainBrightDefault 8
+#define MainBrightMax 8
 #define MainBrightOffset 31
 
 #define RedBrightDefault 63  // Use 63, default, for kits with monochrome LEDs!
@@ -266,7 +270,7 @@ const byte HrLo[12]  = {
 //int8_t SecNow;
 //int8_t MinNow;
 //int8_t HrNow;
-long timeNow;
+long timeNow;  // 24 hour time in seconds (signed!)
 byte HrDisp, MinDisp, SecDisp;
 byte SecNext, MinNext, HrNext;
 
@@ -281,6 +285,8 @@ byte MainBright;
 
 unsigned long millisThen;
 unsigned long millisNow;
+unsigned int millisDelta;  // Now - Then
+
 byte TimeSinceButton;
 byte LastSavedBrightness;
 byte DisplayOn = true;
@@ -357,33 +363,33 @@ void delayTime(byte time)  // delay (time * 0.045) ms
 
 void adjustTime()
 {
-          Serial.print("adjustTime ");
-          Serial.print(hour());
-          Serial.print(":");
-          Serial.print(minute());
-          Serial.print(":");
-          Serial.print(second());
-          Serial.println("");
+unsigned long adjTime = 3600L*hour() + 60*minute() + second();
+#ifdef Debug
+  Serial.print("adjustTime ");
+  Serial.print(hour()); Serial.print(":"); Serial.print(minute()); Serial.print(":"); Serial.println(second());
+  Serial.print("adjTime: "); Serial.print(adjTime); Serial.print(" timeNow: "); Serial.println(timeNow,DEC);
+#endif
   // Set time to that given from PC or GPS
-  timeNow = 3600L*hour() + 60*minute() + second();
-  if (timeNow > 43200)
-    timeNow -= 43200;  // 12 hour time in seconds
+  timeNow = adjTime;
+//  if (timeNow > 43200)
+//    timeNow -= 43200;  // 12 hour time in seconds
 
-  // Print confirmation
-  Serial.print("Clock synced at: ");
-  Serial.println(timeNow,DEC);
-
-  if(timeStatus() == timeSet) {  // update clocks if time has been synced
-    VCRmode = false;
-
-    if ( prevtime != now() )
-    {
-      if (ExtRTC)
-        RTCsetTime(timeNow);
-
-      timeStatus();  // refresh the Date and time properties
-      digitalClockDisplay( );  // update digital clock
-      prevtime = now();
+  if (abs(timeNow-adjTime)>2) {  // adjust only if delta > 2 seconds
+    // Print confirmation
+    Serial.println("Clock synced");
+  
+    if(timeStatus() == timeSet) {  // update clocks if time has been synced
+      VCRmode = false;
+  
+      if ( prevtime != now() )
+      {
+        if (ExtRTC)
+          RTCsetTime(timeNow);
+  
+        timeStatus();  // refresh the Date and time properties
+        digitalClockDisplay( );  // update digital clock
+        prevtime = now();
+      }
     }
   }
 }
@@ -415,7 +421,7 @@ void EEReadSettings (void) {  // TODO: Detect ANY bad values, not just 255.
 
   value = EEPROM.read(0);
 
-  if (value > 8)
+  if (value > MainBrightMax)
     detectBad = 1;
   else
     MainBright = value;  // MainBright has maximum possible value of 8.
@@ -491,13 +497,15 @@ void EESaveSettings (void){
 
 void NormalTimeDisplay(void) {
 byte SecNow, MinNow, HrNow;
-unsigned int t;
+unsigned long t;
 
   t = timeNow;
   HrNow = t/3600;
-  t = t - 3600*HrNow;  // seconds in this hour
+  t = t - 3600L*HrNow;  // seconds in this hour
   MinNow = t/60;
   SecNow = t - 60*MinNow;
+  if (HrNow>12)
+    HrNow -= 12;
 
   SecDisp = (SecNow/2 + 15);  // Offset by 30 s to project *shadow* in the right place.
   if ( SecDisp > 29)
@@ -519,7 +527,8 @@ unsigned int t;
 
   HrDisp = (HrNow + 6);  // Offset by 6 h to project *shadow* in the right place.
 
-  if ( (FadeMode == 2) || (FadeMode == 4) ) {
+//  if ( (FadeMode == 2) || (FadeMode == 4) ) {
+  if ( FadeMode == 4 ) {
     if ( (SettingTime == 0) && (MinNow > 39) )  // If two thirds the hour has gone by, (wbp)
       HrDisp += 1;  // advance the hour hand (wbp)
     if ( (OptionMode == 5) && (SecNow & 1) )  // If setting Fade modes, show hour hand "wiggle"
@@ -539,14 +548,16 @@ unsigned int t;
 void NormalFades(void) {
 byte SecNow, MinNow, HrNow;
 unsigned long msNow;
-unsigned int t;
+unsigned long t;
 
   t = timeNow;
   HrNow = t/3600;
-  t = t - 3600*HrNow;  // seconds in this hour
+  t = t - 3600L*HrNow;  // seconds in this hour
+  if (HrNow > 12)
+    HrNow -= 12;
   MinNow = t/60;
   SecNow = t - 60*MinNow;
-  msNow = millisNow - millisThen;  // how far into this second are we, in ms?
+  msNow = millisDelta;  // how far into this second are we, in ms?
 
   switch (FadeMode)
   {
@@ -558,18 +569,19 @@ unsigned int t;
     if (MinNow & 1)  // Odd minute
       MinFade2 = 32;
     break;
-  case 2:  // straddle 2 LEDs, move hour hand at 40 minutes
-    if (SecNow & 1)  // ODD second
-      SecFade2 = 32;
+  case 2:  // continuous fade of second hand
+    if (SecNow & 1)  // Odd second
+      msNow += 1000;  
+    SecFade2 = msNow*63/2000;
     if (MinNow & 1)  // Odd minute
       MinFade2 = 32;
-    if (MinNow == 39)  // last third of the hour (wbp)
-    {
-      if (SecNow == 59)
-        HrFade2 = (msNow*63/1000);  // fade hour hand to new position
-    }
+//    if (MinNow == 39)  // last third of the hour (wbp)
+//    {
+//      if (SecNow == 59)
+//        HrFade2 = (millisDelta*63/1000);  // fade hour hand to new position
+//    }
     break;
-  case 3:  // original fading
+  case 3:  // original fading (odd seconds only)
   case 4:  // move hour hand at 40 minutes
     // Normal time display
     if (SecNow & 1)  // ODD second
@@ -607,9 +619,9 @@ unsigned int t;
     HrFade2 = FadeConv[MinNow*10/3];  // fade hour hand slowly
     break;
   }
-  SecFade1 = 63 - SecFade2;      
+  SecFade1 = 63 - SecFade2;
   MinFade1 = 63 - MinFade2;
-  HrFade1 = 63 - HrFade2; 
+  HrFade1 = 63 - HrFade2;
 }
 
 void AlignDisplay(void)
@@ -718,7 +730,17 @@ byte secondIn, minuteIn, hourIn;
   hourIn = timeIn/3600;  // hours
   minuteIn = timeIn/60%60;  // minutes
   secondIn = timeIn%60;  // seconds
-  
+
+#ifdef Debug
+  Serial.print("RTCsetTime ");
+  Serial.print(hourIn);
+  Serial.print(":");
+  Serial.print(minuteIn);
+  Serial.print(":");
+  Serial.print(secondIn);
+  Serial.println("");
+#endif
+
   Wire.beginTransmission(104);  // 104 is DS3231 device address
   Wire.write((byte)0);  // start at register 0
 
@@ -755,7 +777,7 @@ byte RTCgetTime()
   Wire.requestFrom(104, 3);  // request three bytes (seconds, minutes, hours)
 
   int seconds, minutes, hours;
-  unsigned int timeRTC;
+  long timeRTC;
   byte updatetime = 0;
   unsigned long tNow;
 
@@ -780,11 +802,15 @@ byte RTCgetTime()
     minutes = (((minutes & 0b11110000)>>4)*10 + (minutes & 0b00001111));  // convert BCD to decimal
     hours = (((hours & 0b00110000)>>4)*10 + (hours & 0b00001111));  // convert BCD to decimal (assume 24 hour mode)
     timeRTC = 3600L*hours + 60*minutes + seconds;  // Values read from RTC
-    if (timeRTC > 43200)
-      timeRTC -= 43200;  // 12 hour time in seconds
+//    if (timeRTC > 43200)
+//      timeRTC -= 43200;  // 12 hour time in seconds
 
     // Optional: report time::
-    // Serial.print(hours); Serial.print(":"); Serial.print(minutes); Serial.print(":"); Serial.println(seconds);
+#ifdef Debug
+  Serial.print("RTCgetTime ");
+  Serial.print(hours); Serial.print(":"); Serial.print(minutes); Serial.print(":"); Serial.println(seconds);
+//  Serial.print("delta="); Serial.println(abs(timeRTC-timeNow));
+#endif
 
 //    if ((minutes) && (MinNow) ) {
     if (minutes) {  // don't adjust if top of the hour
@@ -792,13 +818,17 @@ byte RTCgetTime()
         updatetime = 1;
     }
 
-    if (UpdateRTC)  // First time since power up
-      updatetime = 1;
+#ifdef Debug
+  Serial.print("timeNow: "); Serial.print(timeNow); Serial.print(" timeRTC: "); Serial.println(timeRTC);
+#endif
 
-    if (updatetime)
+    if (UpdateRTC || updatetime)  // if first time since power up, or delta > 2 seconds
     {
       timeNow = timeRTC;  // update time from RTC 
       UpdateRTC = 0;  // time has been set
+#ifdef Debug
+      Serial.println("Time set from RTC");
+#endif
     }
   }
 
@@ -925,7 +955,7 @@ SIGNAL(TIMER1_COMPA_vect)
 }
 
 #define count_max 254
-#define select_max 8
+#define select_max 6
 byte mpx_count = 0;
 byte mpx_select = 0;
 void DisplayMPX(void)  // called at 0.025 ms intervals; does not loop
@@ -957,16 +987,8 @@ void DisplayMPX(void)  // called at 0.025 ms intervals; does not loop
       if (mpx_count > D5)
         NextLED();
       break;
-    case 6:
-      if (mpx_count > ((8-MainBright)*20))
-        NextLED();
-      break;
-    case 7:
-      if (mpx_count > ((8-MainBright)*20))
-        NextLED();
-      break;
-    case 8:
-      if (mpx_count > ((8-MainBright)*20))
+    default:
+      if (mpx_count > ((MainBrightMax-MainBright)*31))
         NextLED();
       break;
   }
@@ -1114,7 +1136,7 @@ void CheckButtons(void)
           else if (SettingTime) {
             
             if (SettingTime == 1)
-              timeNow += 3600;
+              timeNow = timeNow + 3600L;
             if (SettingTime == 2)
               timeNow += 60;
             if (SettingTime > 2) { // could be 3 or 4
@@ -1122,15 +1144,15 @@ void CheckButtons(void)
               SettingTime = 3;  // allow clock to tick
             }
             
-            if (timeNow > 43200)
-              timeNow -= 43200;  // 12 hour time in seconds
+            if (timeNow > 86400)
+              timeNow -= 86400;  // 24 hour time in seconds
            
           }
           else {
             // Brightness control mode
             MainBright++;
-            if (MainBright > 8)
-              MainBright = 8;  
+            if (MainBright > MainBrightMax)
+              MainBright = MainBrightMax;  
           }
         }
       }
@@ -1193,7 +1215,7 @@ void CheckButtons(void)
           }
           else if (SettingTime) {
             if (SettingTime == 1)
-              timeNow -= 3600;
+              timeNow -= 3600L;
             if (SettingTime == 2)
               timeNow -= 60;
             if (SettingTime > 2) {  // could be 3 or 4
@@ -1202,7 +1224,7 @@ void CheckButtons(void)
             }
             
             if (timeNow < 0)
-              timeNow += 43200;  // wrap
+              timeNow += 86400;  // wrap
 
           }
           else {  // Normal brightness adjustment mode
@@ -1367,10 +1389,15 @@ void CheckHeld(void)
       if (AlignMode + OptionMode + SettingTime)  {
         // If we were in any of these modes, let's now return us to normalcy.
         // IF we are exiting time-setting mode, save the time to the RTC, if present:
+//  Serial.print("SettingTime ");
+//  Serial.println(SettingTime);
+//  Serial.print("ExtRTC ");
+//  Serial.println(ExtRTC);
         if (SettingTime && ExtRTC) {
 //          RTCsetTime(HrNow,MinNow,SecNow);
           RTCsetTime(timeNow);
           Blink(200);  // Blink LEDs off to indicate RTC time set
+//          Serial.println("RTC time set");
         }
 
         if (OptionMode) {
@@ -1399,22 +1426,24 @@ void loop()
 
   RefreshTime = AlignMode + SettingTime + OptionMode;
   millisNow = millis();
+  millisDelta = millisNow - millisThen;  // how far into this second are we, in ms?
 //  millisNow += 1;  // temp - simulate 1 ms per 10 ms loop
 
   CheckButtons();
 
 //  millisNow = millis();
   // Since millisNow & millisThen are both unsigned long, this will work correctly even when millis() wraps
-  if ((millisNow - millisThen) >= 1000)  // has 1 second gone by?
+  if (millisDelta >= 1000)  // has 1 second gone by?
   {
     millisThen += 1000;  // do this again in 1 second
+    millisDelta = 0;  // top of the second
 
     CheckHeld();
     
     if (SettingTime < 4) { // if not setting seconds back
       timeNow++;  // the clock ticks...
-      if (timeNow>43200)
-       timeNow -= 43200;
+      if (timeNow >= 86400)
+       timeNow -= 86400;
       RefreshTime = 1;
     }
     
@@ -1482,11 +1511,14 @@ void loop()
 
     if (SettingTime == 1)  // hours
     {
-      HrFade1  = fadeMax;  // make hours bright
+      HrFade1 = fadeMax;  // make hours brightest
+      if ((timeNow >= 43200) && (timeNow & 1)) {  // PM
+          HrFade1 = 31;  // blink for PM
+      }
     }
     if (SettingTime == 2)  // minutes
     {
-      MinFade1  = fadeMax;  // make minutes bright
+      MinFade1 = fadeMax;  // make minutes bright
       if (timeNow/60 & 1)  // odd minutes 
         MinFade2 = fadeMax;  // 2nd LED on as well (wbp)
     }
@@ -1563,7 +1595,6 @@ void loop()
 
   cli();
   if (RefreshTime) {
-//    cli();
     L0 = HrLo[LH1];
     H0 = HrHi[LH1];
     L1 = HrLo[LH2];
@@ -1576,7 +1607,6 @@ void loop()
     H4 = SecHi[LS1];
     L5 = SecLo[LS2];
     H5 = SecHi[LS2];
-//    sei();
   }
 
 // set brightness for each of 6 LED's
@@ -1584,14 +1614,16 @@ void loop()
 // xxFaden = 0 to 63
 // xxBright = 1 to 63 ???
 // dn = 63*63*8/128 = 0 to 248
-//  cli();
-  byte of = 1;
-  D0 = HourBright*HrFade1*MainBright >> 7 + of;  // hbrt * fade * brt / 128
-  D1 = HourBright*HrFade2*MainBright >> 7 + of;  // the "+1" eliminates small glitches at top of second
-  D2 = MinBright*MinFade1*MainBright >> 7 + of;
-  D3 = MinBright*MinFade2*MainBright >> 7 + of;
-  D4 = SecBright*SecFade1*MainBright >> 7 + of;
-  D5 = SecBright*SecFade2*MainBright >> 7 + of;
+byte tempBright = MainBright;
+byte of = 1;
+  if (SettingTime)
+    tempBright = MainBrightMax;
+  D0 = HourBright*HrFade1*tempBright >> 7 + of;  // hbrt * fade * brt / 128
+  D1 = HourBright*HrFade2*tempBright >> 7 + of;  // the "+1" eliminates small glitches at top of second
+  D2 = MinBright*MinFade1*tempBright >> 7 + of;
+  D3 = MinBright*MinFade2*tempBright >> 7 + of;
+  D4 = SecBright*SecFade1*tempBright >> 7 + of;
+  D5 = SecBright*SecFade2*tempBright >> 7 + of;
   sei();
 
 
@@ -1607,11 +1639,11 @@ void loop()
 
   while ((millis() - millisNow) < 10) {  // run the main loop at 100 hz 
 //    asm("nop");
-    if (Serial.available())  // data on the serial port?
+    if (Serial.available()) {  // data on the serial port?
       ExtGPS = getGPSdata();  // collect GPS data and parse it, maybe set the time
-      if (ExtGPS) {   // If GPS is working and RMC message was used to set system time
+      if (ExtGPS)   // If GPS is working and RMC message was used to set system time
         adjustTime();  // adjust clock time
-      }
+    }
   }
 
 }  // END Loop

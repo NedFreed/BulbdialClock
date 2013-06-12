@@ -13,7 +13,7 @@ unsigned long tGPSupdateUT = 0;  // time since last GPS update in UT
 unsigned long tGPSupdate = 0;  // time since last GPS update in local time
 byte GPSupdating = false;
 
-int8_t TZ_hour = 0;  // Time zone hour
+int8_t TZ_hour = -8;  // Time zone hour
 int8_t TZ_minutes = 0;  // Time zone minute (multiples of 15 minutes)
 uint8_t DST_offset = 1;  // temp
 
@@ -203,9 +203,10 @@ byte parseGPSdata(char *gpsBuffer) {
           else
             tNow = tNow + (long)TZ_minutes * SECS_PER_MIN;  // 01feb13/wbp
           tGPSupdate = tNow;  // remember time of this update (local time)
+//#ifdef Debug
           setTime(tNow);  // adjust system time
-          Serial.print("time set from GPS to ");
-          Serial.println(tNow, DEC);
+          Serial.print("System time set from GPS to "); Serial.println(tNow, DEC);
+//#endif
           return 1;
         }
 
