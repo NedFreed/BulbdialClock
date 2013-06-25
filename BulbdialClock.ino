@@ -363,7 +363,7 @@ void delayTime(byte time)  // delay (time * 0.045) ms
 
 void adjustTime()
 {
-unsigned long adjTime = 3600L*hour() + 60*minute() + second();
+long adjTime = 3600L*hour() + 60*minute() + second();
 #ifdef Debug
   Serial.print("adjustTime ");
   Serial.print(hour()); Serial.print(":"); Serial.print(minute()); Serial.print(":"); Serial.println(second());
@@ -376,7 +376,9 @@ unsigned long adjTime = 3600L*hour() + 60*minute() + second();
 
   if (abs(timeNow-adjTime)>2) {  // adjust only if delta > 2 seconds
     // Print confirmation
+#ifdef Debug
     Serial.println("Clock synced");
+#endif
   
     if(timeStatus() == timeSet) {  // update clocks if time has been synced
       VCRmode = false;
@@ -529,7 +531,7 @@ unsigned long t;
 
 //  if ( (FadeMode == 2) || (FadeMode == 4) ) {
   if ( FadeMode == 4 ) {
-    if ( (SettingTime == 0) && (MinNow > 39) )  // If two thirds the hour has gone by, (wbp)
+    if ( (SettingTime == 0) && (MinNow >= 45) )  // If 3/4 hour has gone by, (wbp)
       HrDisp += 1;  // advance the hour hand (wbp)
     if ( (OptionMode == 5) && (SecNow & 1) )  // If setting Fade modes, show hour hand "wiggle"
       HrDisp += 1;
@@ -593,7 +595,7 @@ unsigned long t;
       }
     }
     // fade the hour hand to it's next position, starting either at Minute 59 or Minute 39
-    if ( ((MinNow == 59) && (FadeMode == 3)) || ((MinNow == 39) && (FadeMode == 4)) )  // end of the hour or second half of the hour (wbp)
+    if ( ((MinNow == 59) && (FadeMode == 3)) || ((MinNow == 44) && (FadeMode == 4)) )  // end of the hour or 3/4 hour (wbp)
     {
       if (SecNow == 59){
         HrFade2 = SecFade2;
