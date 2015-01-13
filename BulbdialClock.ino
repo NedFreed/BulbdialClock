@@ -12,6 +12,7 @@ Updates 2013 William B Phelps:
  - interrupt driven display
  - GPS support
 Todo:
+ - auto bright with sensor
  - auto dim/bright (needs 24 hour time - how to display/set?)
  - how do you show am or pm on a 12 hour clock that only has hands?
  - if GPS, set but ignore Chronodot?
@@ -99,7 +100,7 @@ Todo:
 
 // Negative masks of those LED positions, for quick turn-off:
 #define LEDsBInv 248
-#define LEDsCInv 240
+#define LEDsCInv 240  // B 1111 0000
 #define LEDsDInv 227
 
 #define LED_B_Off();   DDRB &= LEDsBInv;  PORTB &= LEDsBInv;
@@ -141,19 +142,19 @@ void TakeHigh(byte LEDline)
     PORTB |= 4;
     break;
   case 2:
-    DDRC  |= 1;
+    DDRC  |= 1;  // PC0
     PORTC |= 1;
     break;
   case 3:
-    DDRC  |= 2;
+    DDRC  |= 2;  // PC1
     PORTC |= 2;
     break;
   case 4:
-    DDRC  |= 4;
+    DDRC  |= 4;  // PC2
     PORTC |= 4;
     break;
   case 5:
-    DDRC  |= 8;
+    DDRC  |= 8;  // PC3
     PORTC |= 8;
     break;
   case 6:
@@ -190,19 +191,19 @@ void TakeLow(byte LEDline)
     PORTB &= 251;
     break;
   case 2:
-    DDRC  |= 1;
+    DDRC  |= 1;  // PC0
     PORTC &= 254;
     break;
   case 3:
-    DDRC  |= 2;
+    DDRC  |= 2;  // PC1
     PORTC &= 253;
     break;
   case 4:
-    DDRC  |= 4;
+    DDRC  |= 4;  // PC2
     PORTC &= 251;
     break;
   case 5:
-    DDRC  |= 8;
+    DDRC  |= 8;  // PC3
     PORTC &= 247;
     break;
   case 6:
