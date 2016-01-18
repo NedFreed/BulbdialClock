@@ -3,6 +3,7 @@
 
 Updates 2015-2016 Ned Freed:
  - Fixed annoying bug where "next" LED in each ring was always dimly lit
+ - Reenable RTC, which was disabled for some reason
  - Fade modes are now:
      0 - no fading
      1 - straddle 2 LEDs for odd seconds
