@@ -1,7 +1,23 @@
 /*
  BulbdialClock.ino
 
-Updates 2013 William B Phelps:
+Updates 2015-2016 Ned Freed:
+ - Fixed annoying bug where "next" LED in each ring was always dimly lit
+ - Fade modes are now:
+     0 - no fading
+     1 - straddle 2 LEDs for odd seconds
+     3 - original fading support
+     4 - original fading support, move hour hand at 31 minutes
+     5 - continuous fading
+     6 - continuous fading, move hour hand at 31 minutes
+     7 - continuous logarithmic fading
+     8 - continuous logarithmic fading, move hour hand at 31 minutes
+ - Removed hour hand fading; the LEDs are too far apart for it to produce acceptable clock hands
+ - I don't care for minute fading either so made it a compile option
+ - Photocell support
+ - Brightness buttons no longer wrap
+  
+Updates 2013 William B Phelps: (available from https://github.com/wbphelps/BulbdialClock)
  - advance hour hand at minute>30
  - keep time as signed long instead of hr, min, sec
  - light 2 LED's while setting seconds, minutes to show odd numbers
@@ -56,11 +72,23 @@ Todo:
  * Blue brightness (range: 0-63)    Default: 63
  
  * Time direction (Range: 0,1)      Default: 0  (Clockwise)
- * Fade style (Range: 0,3)         Default: 1  (Fade enabled)
+ * Fade style (Range: 0,3)          Default: 1  (Fade enabled)
  
- * Alignment mode                  Default: 0
+ * Alignment mode                   Default: 0
  
  */
+
+// Uncomment to enable minute fading in new fade modes
+// #define MINUTEFADE
+
+// Uncomment to enable photocell support
+#define PHOTOCELL
+
+// Uncomment to enable photocell debug support
+// #define PHOTOCELL_DEBUG
+
+// Uncomment to enable digit level debug output
+// #define DIGIT_DEBUG
 
 // "Factory" default configuration can be configured here:
 #define MainBrightDefault 8
@@ -71,30 +99,49 @@ Todo:
 #define BlueBrightDefault 63
 
 #define CCWDefault 0
-#define FadeModeDefault 1
-#define FadeModes 6
+#define FadeModeDefault 3
+#define FadeModes 8
 
 #define AlignModeDefault 0
 
 #define TIME_MSG_LEN 11  // time sync to PC is HEADER followed by unix time_t as ten ascii digits
 #define TIME_HEADER 255  // Header tag for serial time sync message
 
-// The buttons are located at D5, D6, & D7.
+// The buttons are located at PD5, PD6, & PD7.
 #define buttonmask 224
 
-// LED outputs B0-B2:
-#define LEDsB 7
+#ifdef PHOTOCELL
 
-// C0-C3 are LED outputs:
-#define LEDsC 15
+#define PHOTOCELL_PIN 0
 
-// TX, PD2,PD3,PD4 are LED outputs.
-#define LEDsD 28
+// Photocell support moves LED2 from PC0/ADC0 (pin 23) to PB4/MISO (pin 18)
+
+// PB0(LED8),PB1(LED10),PB2(LED1),PB4(LED2) are LED outputs:
+#define LEDsB (1 | 2 | 4 | 16)
+
+// PC1(LED3), PC2(LED4),PC3(LED5) are LED outputs:
+#define LEDsC (2 | 4 | 8)
+
+// PD2(LED7),PD3(LED9),PD4(LED6) are LED outputs:
+#define LEDsD (4 | 8 | 16)
+
+#else
+
+// PB0(LED8),PB1(LED10),PB2(LED1) are LED outputs:
+#define LEDsB (1 | 2 | 4)
+
+// PC0(LED2),PC1(LED3),PC2(LED4),PC3(LED5) are LED outputs:
+#define LEDsC (1 | 2 | 4 | 8)
+
+// PD2(LED7),PD3(LED9),PD4(LED6) are LED outputs:
+#define LEDsD (4 | 8 | 16)
+
+#endif
 
 // Negative masks of those LED positions, for quick turn-off:
-#define LEDsBInv 248
-#define LEDsCInv 240
-#define LEDsDInv 227
+#define LEDsBInv ((~LEDsB) & 255)
+#define LEDsCInv ((~LEDsC) & 255)
+#define LEDsDInv ((~LEDsD) & 255)
 
 #define LED_B_Off();   DDRB &= LEDsBInv;  PORTB &= LEDsBInv;
 #define LED_C_Off();   DDRC &= LEDsCInv;  PORTC &= LEDsCInv;
@@ -130,43 +177,50 @@ void TakeHigh(byte LEDline)
 {
   switch( LEDline )
   {
-  case 1:
+  case 1: // PB2
     DDRB  |= 4;
     PORTB |= 4;
     break;
-  case 2:
+#ifdef PHOTOCELL
+  case 2: // PB4
+    DDRB  |= 16;
+    PORTB |= 16;
+    break;
+#else
+  case 2: // PC0
     DDRC  |= 1;
     PORTC |= 1;
     break;
-  case 3:
+#endif
+  case 3: // PC1
     DDRC  |= 2;
     PORTC |= 2;
     break;
-  case 4:
+  case 4: // PC2
     DDRC  |= 4;
     PORTC |= 4;
     break;
-  case 5:
+  case 5: // PC3
     DDRC  |= 8;
     PORTC |= 8;
     break;
-  case 6:
+  case 6: // PD4
     DDRD  |= 16;
     PORTD |= 16;
     break;
-  case 7:
+  case 7: // PD2
     DDRD  |= 4;
     PORTD |= 4;
     break;
-  case 8:
+  case 8: // PB0
     DDRB  |= 1;
     PORTB |= 1;
     break;
-  case 9:
+  case 9: // PD3
     DDRD  |= 8;
     PORTD |= 8;
     break;
-  case 10:
+  case 10: // PB1
     DDRB  |= 2;
     PORTB |= 2;
     break;
@@ -179,43 +233,50 @@ void TakeLow(byte LEDline)
 {
   switch( LEDline )
   {
-  case 1:
+  case 1: // PB2
     DDRB  |= 4;
     PORTB &= 251;
     break;
-  case 2:
+#ifdef PHOTOCELL
+  case 2: // PB4
+    DDRB  |= 16;
+    PORTB &= 239;
+    break;
+#else
+  case 2: // PC0
     DDRC  |= 1;
     PORTC &= 254;
     break;
-  case 3:
+#endif
+  case 3: // PC1
     DDRC  |= 2;
     PORTC &= 253;
     break;
-  case 4:
+  case 4: // PC2
     DDRC  |= 4;
     PORTC &= 251;
     break;
-  case 5:
+  case 5: // PC3
     DDRC  |= 8;
     PORTC &= 247;
     break;
-  case 6:
+  case 6: // PD4
     DDRD  |= 16;
     PORTD &= 239;
     break;
-  case 7:
+  case 7: // PD2
     DDRD  |= 4;
     PORTD &= 251;
     break;
-  case 8:
+  case 8: // PB0
     DDRB  |= 1;
     PORTB &= 254;
     break;
-  case 9:
+  case 9: // PD3
     DDRD  |= 8;
     PORTD &= 247;
     break;
-  case 10:
+  case 10: // PB1
     DDRB  |= 2;
     PORTB &= 253;
     break;
@@ -307,6 +368,54 @@ byte HourBright;
 byte MinBright;
 byte SecBright;
 byte MainBright;
+byte AdjustedBright;
+
+#ifdef PHOTOCELL
+
+long int ambient;
+
+void AdjustBrightness() {
+  int a;
+
+#ifdef PHOTOCELL_DEBUG
+  Serial.print("Ambient: "); Serial.print(ambient);
+#endif
+  if (ambient > 200)
+    a = 2;
+  else if (ambient > 90)
+    a = 1;
+  else if (ambient > 20)
+    a = 0;
+  else if (ambient > 15)
+    a = -1;
+  else if (ambient > 12)
+    a = -2;
+  else
+    a = -3;
+#ifdef PHOTOCELL_DEBUG
+  Serial.print(" Brightness adjustment: "); Serial.print(a);
+  Serial.print(" Unadjusted brightness: "); Serial.print(MainBright);
+#endif
+  a += MainBright;
+  if (a > 8)
+      a = 8;
+  else if (a < 1)
+      a = 1;
+  AdjustedBright = a;
+#ifdef PHOTOCELL_DEBUG
+  Serial.print(" Adjusted brightness: "); Serial.println(AdjustedBright);
+#endif
+}
+
+#else
+
+// No-op without photocell
+
+void AdjustBrightness() {
+  AdjustedBright = MainBright;
+}
+
+#endif
 
 unsigned long millisThen;
 unsigned long millisNow;
@@ -336,6 +445,7 @@ byte AlignLoopCount;
 byte StartingOption;
 
 byte HoldTimeSet;
+byte HoldTimeGet;
 byte HoldOption;
 byte HoldAlign;
 
@@ -362,6 +472,7 @@ void ApplyDefaults (void) {
    */
 
   MainBright = MainBrightDefault;
+  AdjustBrightness();
   HourBright = RedBrightDefault;
   MinBright = GreenBrightDefault;
   SecBright = BlueBrightDefault;
@@ -374,17 +485,20 @@ void ApplyDefaults (void) {
 void EEReadSettings (void) {  // TODO: Detect ANY bad values, not just 255.
 
   byte detectBad = 0;
-  byte value = 255;
+  byte value;
 
   value = EEPROM.read(0);
 
-  if (value > 8)
+  if (value > 8) {
     detectBad = 1;
-  else
+    MainBright = MainBrightDefault;
+  } else
     MainBright = value;  // MainBright has maximum possible value of 8.
 
   if (value == 0)
     MainBright = 1;  // Turn back on when power goes back on-- don't leave it dark.
+
+  AdjustBrightness();
 
   value = EEPROM.read(1);
   if (value > 63)
@@ -432,7 +546,7 @@ void EEUpdate(int loc, byte val)
 }
 
 void EESaveSettings (void){
-  //EEPROM.write(Addr, Value);
+  // EEPROM.write(Addr, Value);
 
   // Careful if you use this function: EEPROM has a limited number of write
   // cycles in its life.  Good for human-operated buttons, bad for automation.
@@ -482,7 +596,7 @@ unsigned int t;
 
   HrDisp = (HrNow + 6);  // Offset by 6 h to project *shadow* in the right place.
   
-  if ( (FadeMode == 2) || (FadeMode == 4)) {
+  if ( (FadeMode == 2) || (FadeMode == 4) || (FadeMode == 6) || (FadeMode == 8) ) {
     if ( (SettingTime == 0) && (MinNow > 30) )  // If half the hour has gone by, (wbp)
       HrDisp += 1;  // advance the hour hand (wbp)
     if ( (OptionMode == 5) && (SecNow & 1) )  // If setting Fade modes, show hour hand "wiggle"
@@ -515,10 +629,12 @@ unsigned int t;
   {
   case 0:  // no fading
     break;
+
   case 1:  // straddle 2 LEDs for odd seconds
     if (SecNow & 1)  // ODD second
       SecFade2 = 32;
     break;
+
   case 2:  // straddle 2 LEDs, move hour hand at 31 minutes
     if (SecNow & 1)  // ODD second
       SecFade2 = 32;
@@ -528,6 +644,7 @@ unsigned int t;
         HrFade2 = (msNow*63/1000);  // fade hour hand to new position
     }
     break;
+
   case 3:  // original fading
   case 4:  // move hour hand at 31 minutes
     // Normal time display
@@ -547,23 +664,65 @@ unsigned int t;
       }
     }
     break;
+
   case 5:  // continuous fading
+  case 6:  // move hour hand at 31 minutes
     if (SecNow & 1)  // Odd second
       msNow += 1000;  
     SecFade2 = msNow*63/2000;
+    if (FadeMode == 6)
+    {
+      if (MinNow == 30)  // second half of the hour (wbp)
+      {
+        if (SecNow == 59)
+          HrFade2 = (msNow*63/1000);  // fade hour hand to new position
+      }      
+    }
+    // Hour LEDs too far apart for this to work acceptably
+    // else
+    //   HrFade2 = MinNow*63/60;  // fade hour hand slowly
+#ifdef MINUTEFADE
     if (MinNow & 1)  // Odd minute
         SecNow += 60;
     MinFade2 = SecNow*63/120;  // fade minute hand slowly
-    HrFade2 = MinNow*63/60;  // fade hour hand slowly
+#else
+    if (MinNow & 1)  // ODD minute
+    {
+      if ((SecNow == 59) || SettingTime) {
+        MinFade2 = SecFade2;
+      }
+    }
+#endif
     break;
-  case 6:  // continuous logarithmic fading
+
+  case 7:  // continuous logarithmic fading
+  case 8:  // move hour hand at 31 minutes
     if (SecNow & 1)  // Odd second
       msNow += 1000;  
     SecFade2 = FadeConv[msNow/10];  // 0 to 63
+    if (FadeMode == 8)
+    {
+      if (MinNow == 30)  // second half of the hour (wbp)
+      {
+        if (SecNow == 59)
+          HrFade2 = (msNow*63/1000);  // fade hour hand to new position
+      }
+    }
+    // Hour LEDs too far apart for this to work acceptably
+    // else
+    //   HrFade2 = FadeConv[MinNow*10/3];  // fade hour hand slowly
+#ifdef MINUTEFADE
     if (MinNow & 1)  // Odd minute
       SecNow += 60;
     MinFade2 = FadeConv[SecNow*5/3];  // fade minute hand slowly
-    HrFade2 = FadeConv[MinNow*10/3];  // fade hour hand slowly
+#else
+    if (MinNow & 1)  // ODD minute
+    {
+      if ((SecNow == 59) || SettingTime) {
+        MinFade2 = SecFade2;
+      }
+    }
+#endif
     break;
   }
   SecFade1 = 63 - SecFade2;      
@@ -743,7 +902,7 @@ byte RTCgetTime()
       timeRTC -= 43200;  // 12 hour time in seconds
 
     // Optional: report time::
-    // Serial.print(hours); Serial.print(":"); Serial.print(minutes); Serial.print(":"); Serial.println(seconds);
+    Serial.print(hours); Serial.print(":"); Serial.print(minutes); Serial.print(":"); Serial.println(seconds);
 
 //    if ((minutes) && (MinNow) ) {
     if (minutes) {  // don't adjust if top of the hour
@@ -788,6 +947,10 @@ void setup()  // run once, when the sketch starts
   SecDisp = 0;
   MinDisp = 0;
 
+#ifdef PHOTOCELL
+  ambient = (long int)analogRead(PHOTOCELL_PIN);
+#endif
+
   EEReadSettings();
 
   /*
@@ -807,6 +970,7 @@ void setup()  // run once, when the sketch starts
   // ButtonHold = 0;
 
   HoldTimeSet = 0;
+  HoldTimeGet = 0;
   HoldOption = 0;
   HoldAlign = 0;
   MomentaryOverridePlus = 0;
@@ -916,15 +1080,15 @@ void DisplayMPX(void)  // called at 0.025 ms intervals; does not loop
         NextLED();
       break;
     case 6:
-      if (mpx_count > ((8-MainBright)*20))
+      if (mpx_count > ((8-AdjustedBright)*20))
         NextLED();
       break;
     case 7:
-      if (mpx_count > ((8-MainBright)*20))
+      if (mpx_count > ((8-AdjustedBright)*20))
         NextLED();
       break;
     case 8:
-      if (mpx_count > ((8-MainBright)*20))
+      if (mpx_count > ((8-AdjustedBright)*20))
         NextLED();
       break;
   }
@@ -940,28 +1104,48 @@ void NextLED(void)
   switch(mpx_select)  // now turn the LED on
   {
     case 0:
+      if (D0 > 0)
+      {
         TakeHigh(H0);
         TakeLow(L0);
+      }
       break;
     case 1:
+      if (D1 > 0)
+      {
         TakeHigh(H1);
         TakeLow(L1);
+      }
       break;
     case 2:
+      if (D2 > 0)
+      {
         TakeHigh(H2);
         TakeLow(L2);
+      }
       break;
     case 3:
+      if (D3 > 0)
+      {
         TakeHigh(H3);
         TakeLow(L3);
+      }
       break;
     case 4:
+      if (D4 > 0)
+      {
         TakeHigh(H4);
         TakeLow(L4);
+      }
       break;
     case 5:
+      if (D5 > 0)
+      {
         TakeHigh(H5);
         TakeLow(L5);
+      }
+      break;
+    default:
       break;
   }
 }
@@ -1029,8 +1213,10 @@ void CheckButtons(void)
       {
         if (SleepMode)
           SleepMode = 0;
-        else{
-          if (AlignMode) {
+        else
+        {
+          if (AlignMode)
+          {
 
             if ( AlignMode & 1)  // Odd mode:
             {
@@ -1041,8 +1227,8 @@ void CheckButtons(void)
               IncrAlignVal();  // Even mode:
 
           }
-          else if (OptionMode) {
-
+          else if (OptionMode)
+          {
             if (OptionMode == 1)
             {
               if (HourBright < 62)
@@ -1086,9 +1272,11 @@ void CheckButtons(void)
           }
           else {
             // Brightness control mode
-            MainBright++;
-            if (MainBright > 8)
-              MainBright = 8;  
+            if (MainBright < 8)
+              MainBright++;
+            else
+              MainBright = 8;
+            AdjustBrightness();
           }
         }
       }
@@ -1168,6 +1356,7 @@ void CheckButtons(void)
               MainBright--;
             else
               MainBright = 1;
+            AdjustBrightness();
           }
         }
       }
@@ -1235,6 +1424,7 @@ void CheckHeld(void)
       // Reset the variables that check to see if buttons are being held down.
 
       HoldTimeSet = 0;
+      HoldTimeGet = 0;
       HoldOption = 0;
       HoldAlign = 0;
       FactoryResetDisable = 1;
@@ -1260,16 +1450,26 @@ void CheckHeld(void)
         HoldAlign++;  // We are holding for alignment mode.
         HoldOption = 0;
         HoldTimeSet = 0;
+        HoldTimeGet = 0;
       }
       if (( PIND & buttonmask) == 64)  // "+" and "Z" are pressed down. "-" is up.
       {
         HoldOption++;  // We are holding for option setting mode.
         HoldTimeSet = 0;
+        HoldTimeGet = 0;
         HoldAlign = 0;
       }
       if (( PIND & buttonmask) == 96)  // "Z" is pressed down. "+" and "-" are up.
       {
         HoldTimeSet++;  // We are holding for time setting mode.
+        HoldTimeGet = 0;
+        HoldOption = 0;
+        HoldAlign = 0;
+      }
+      if (( PIND & buttonmask) == 32)  // "-" and "Z" are pressed down. "+" is up.
+      {
+        HoldTimeGet++;  // We are holding for time setting mode.
+        HoldTimeSet = 0;
         HoldOption = 0;
         HoldAlign = 0;
       }
@@ -1324,9 +1524,8 @@ void CheckHeld(void)
 
       if (AlignMode + OptionMode + SettingTime)  {
         // If we were in any of these modes, let's now return us to normalcy.
-        // IF we are exiting time-setting mode, save the time to the RTC, if present:
+        // If we are exiting time-setting mode, save the time to the RTC, if present:
         if (SettingTime && ExtRTC) {
-//          RTCsetTime(HrNow,MinNow,SecNow);
           RTCsetTime(timeNow);
           Blink(200);  // Blink LEDs off to indicate RTC time set
         }
@@ -1340,6 +1539,35 @@ void CheckHeld(void)
       else
       {  // Go to setting mode IF and ONLY IF we were in regular-clock-display mode.
         SettingTime = 1;  // Start with HOURS in setting mode.
+      }
+
+      AlignMode = 0;
+      OptionMode = 0;
+
+    }
+
+    if (HoldTimeGet == 3)
+    {
+      MomentaryOverrideZ = 1;
+
+      if (AlignMode + OptionMode + SettingTime)  {
+        // If we were in any of these modes, let's now return us to normalcy.
+        // If we are exiting time-setting mode, save the time to the RTC, if present:
+        if (SettingTime && ExtRTC) {
+          RTCsetTime(timeNow);
+          Blink(200);  // Blink LEDs off to indicate RTC time set
+        }
+
+        if (OptionMode) {
+          EESaveSettings();  // Save options if exiting option mode!
+        }
+
+        SettingTime = 0;
+      }
+      else if (ExtRTC)
+      {  // Get from RTC IF and ONLY IF we were in regular-clock-display mode.
+          ExtRTC = RTCgetTime();
+          Blink(300);  // Blink LEDs off to indicate RTC time set
       }
 
       AlignMode = 0;
@@ -1376,9 +1604,26 @@ void loop()
       RefreshTime = 1;
     }
     
-//    if (((timeNow%60) == 0) && (SettingTime == 0) && ExtRTC)  // Check RTC once per minute, if not setting time & RTC enabled
-//      RTCgetTime();
+    if (((timeNow%60) == 0) && (SettingTime == 0) && ExtRTC)  // Check RTC once per minute, if not setting time & RTC enabled
+      RTCgetTime();
 
+#ifdef PHOTOCELL
+    if ((timeNow%2) == 0)
+    {
+      ambient = (ambient * 3L + (long int)analogRead(PHOTOCELL_PIN) * 1L) / 4L;
+      if (AlignMode + OptionMode + SettingTime == 0)
+        AdjustBrightness();
+    }
+#endif
+
+#ifdef DIGIT_DEBUG
+  Serial.print(" DO: "); Serial.print(D0);
+  Serial.print(" D1: "); Serial.print(D1);
+  Serial.print(" D2: "); Serial.print(D2);
+  Serial.print(" D3: "); Serial.print(D3);
+  Serial.print(" D4: "); Serial.print(D4);
+  Serial.print(" D5: "); Serial.println(D5);
+#endif
   }
   
 
@@ -1538,18 +1783,18 @@ void loop()
   }
 
 // set brightness for each of 6 LED's
-// MainBright = 1 to 8
+// AdjustedBright = 1 to 8
 // xxFaden = 0 to 63
 // xxBright = 1 to 63 ???
 // dn = 63*63*8/128 = 0 to 248
 //  cli();
   byte of = 1;
-  D0 = HourBright*HrFade1*MainBright >> 7 + of;  // hbrt * fade * brt / 128
-  D1 = HourBright*HrFade2*MainBright >> 7 + of;  // the "+1" eliminates small glitches at top of second
-  D2 = MinBright*MinFade1*MainBright >> 7 + of;
-  D3 = MinBright*MinFade2*MainBright >> 7 + of;
-  D4 = SecBright*SecFade1*MainBright >> 7 + of;
-  D5 = SecBright*SecFade2*MainBright >> 7 + of;
+  D0 = HourBright*HrFade1*AdjustedBright >> 7 + of;  // hbrt * fade * brt / 128
+  D1 = HourBright*HrFade2*AdjustedBright >> 7 + of;  // the "+1" eliminates small glitches at top of second
+  D2 = MinBright*MinFade1*AdjustedBright >> 7 + of;
+  D3 = MinBright*MinFade2*AdjustedBright >> 7 + of;
+  D4 = SecBright*SecFade1*AdjustedBright >> 7 + of;
+  D5 = SecBright*SecFade2*AdjustedBright >> 7 + of;
   sei();
 
 
@@ -1589,4 +1834,5 @@ void loop()
     asm("nop");
 
 }  // END Loop
+
 
