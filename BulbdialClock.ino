@@ -2,8 +2,10 @@
  BulbdialClock.ino
 
 Updates 2015-2016 Ned Freed:
- - Fixed annoying bug where "next" LED in each ring was always dimly lit
- - Reenable RTC, which was disabled for some reason
+ - Fixed annoying bug where "next" LED in each ring was always dimly lit.
+ - RTC calculation incorrectly used an unsigned int as a temporary. These values can
+   reach 86400,which is bigger than 2^16. Switch to use a long instead.
+ - Reenable regular RTC updates, which were disabled, likely due to preceding bug.
  - Fade modes are now:
      0 - no fading
      1 - straddle 2 LEDs for odd seconds
@@ -17,7 +19,7 @@ Updates 2015-2016 Ned Freed:
  - I don't care for minute fading either so made it a compile option
  - Photocell support
  - Brightness buttons no longer wrap
-  
+
 Updates 2013 William B Phelps: (available from https://github.com/wbphelps/BulbdialClock)
  - advance hour hand at minute>30
  - keep time as signed long instead of hr, min, sec
@@ -90,6 +92,9 @@ Todo:
 
 // Uncomment to enable digit level debug output
 // #define DIGIT_DEBUG
+
+// Uncomment to enable RTC debugging
+// #define RTC_DEBUG
 
 // "Factory" default configuration can be configured here:
 #define MainBrightDefault 8
@@ -320,7 +325,7 @@ boolean getPCtime() {
 void printDigits(byte digits){
   // utility function for digital clock display: prints preceding colon and leading 0
   Serial.print(":");
-  if(digits < 10)
+  if (digits < 10)
     Serial.print('0');
   Serial.print(digits,DEC);
 }
@@ -838,6 +843,13 @@ byte secondIn, minuteIn, hourIn;
   minuteIn = timeIn/60%60;  // minutes
   secondIn = timeIn%60;  // seconds
   
+#ifdef RTC_DEBUG
+  // Optional: report time::
+  Serial.print("Setting RTC time: ");
+  Serial.print(hourIn, DEC); printDigits(minuteIn); printDigits(secondIn);
+  Serial.println("");
+#endif
+
   Wire.beginTransmission(104);  // 104 is DS3231 device address
   Wire.write((byte)0);  // start at register 0
 
@@ -874,9 +886,8 @@ byte RTCgetTime()
   Wire.requestFrom(104, 3);  // request three bytes (seconds, minutes, hours)
 
   int seconds, minutes, hours;
-  unsigned int timeRTC;
+  long timeRTC;
   byte updatetime = 0;
-  unsigned long tNow;
 
   while(Wire.available())
   {
@@ -886,7 +897,7 @@ byte RTCgetTime()
     hours = Wire.read();    // get hours
   }
 
-  // IF time is off by MORE than two seconds, then correct the displayed time.
+  // If time is off by MORE than two seconds, then correct the displayed time.
   // Otherwise, DO NOT update the time, it may be a sampling error rather than an
   // actual offset.
   // Skip checking if minutes == 0. -- the 12:00:00 rollover is distracting,
@@ -897,16 +908,19 @@ byte RTCgetTime()
   if (status){
     seconds = (((seconds & 0b11110000)>>4)*10 + (seconds & 0b00001111));  // convert BCD to decimal
     minutes = (((minutes & 0b11110000)>>4)*10 + (minutes & 0b00001111));  // convert BCD to decimal
-    hours = (((hours & 0b00110000)>>4)*10 + (hours & 0b00001111));  // convert BCD to decimal (assume 24 hour mode)
-    timeRTC = 3600*hours + 60*minutes + seconds;  // Values read from RTC
-    if (timeRTC > 43200)
-      timeRTC -= 43200;  // 12 hour time in seconds
+    hours = (((hours & 0b00110000)>>4)*10 + (hours & 0b00001111));        // convert BCD to decimal (assume 24 hour mode)
+    timeRTC = 3600L*(long)hours + 60L*(long)minutes + (long)seconds;      // combine alues read from RTC
+    if (timeRTC > 43200L)
+      timeRTC -= 43200L;  // 12 hour time in seconds
 
-    // Optional: report time::
-    Serial.print(hours); Serial.print(":"); Serial.print(minutes); Serial.print(":"); Serial.println(seconds);
+#ifdef RTC_DEBUG
+    // Optional: report time:
+    Serial.print("Time from RTC: ");
+    Serial.print(hours, DEC); printDigits(minutes); printDigits(seconds);
+    Serial.println("");
+#endif
 
-//    if ((minutes) && (MinNow) ) {
-    if (minutes) {  // don't adjust if top of the hour
+    if (minutes != 0 && timeNow % 60 != 0) {  // don't adjust if top of the hour
       if (abs(timeRTC - timeNow) > 2)  // only adjust if more than 2 seconds off
         updatetime = 1;
     }
@@ -917,7 +931,7 @@ byte RTCgetTime()
     if (updatetime)
     {
       timeNow = timeRTC;  // update time from RTC 
-      UpdateRTC = 0;  // time has been set
+      UpdateRTC = 0;      // time has been set
     }
   }
 
@@ -1600,7 +1614,7 @@ void loop()
     
     if (SettingTime < 4) { // if not setting seconds back
       timeNow++;  // the clock ticks...
-      if (timeNow>43200)
+      if (timeNow > 43200)
        timeNow -= 43200;
       RefreshTime = 1;
     }

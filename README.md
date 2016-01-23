@@ -5,6 +5,13 @@ The following changes have been made:
 
  - Fixed annoying bug where "next" LED in each ring was always dimly lit
 
+ - RTC calculation incorrectly used an unsigned int as a temporary. These values
+   can reach 86400, which is bigger than 2^16. Switch to use a long instead.
+   (I note that this bug is present in the original Bulbdial code.)
+
+ - Reenable regular RTC updates, which were disabled, likely due to preceding
+   bug.
+
  - Fade modes are now:
      0 - no fading
      1 - straddle 2 LEDs for odd seconds
@@ -27,6 +34,6 @@ The following changes have been made:
    pullup resistor. The photocell can then be wired to the ICSP header.
    Note that the constant values will almost certainly require adjustment
    depending on the photocell placement in the case as well as the case
-   type.
+   type. This support is enabled via a compile option (PHOTOCELL).
 
  - Brightness buttons no longer wrap.
